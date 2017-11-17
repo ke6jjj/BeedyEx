@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from math import exp, sqrt, log
 import numpy
 import pyEQ
@@ -121,7 +122,7 @@ class DBXDecoder(object):
     '''Instantiate a decoder for a given DBX algorithm and sample rate.
 
     typ - DBX algorithm/type, as an integer.
-          1 = DBX type I (the only supported type at the moment).
+          2 = DBX type II (the only supported type at the moment).
     rate - Sampling rate, in hertz.'''
 
     if typ != self.Type_II:
