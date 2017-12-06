@@ -19,7 +19,16 @@ class EnvelopeFollower(object):
     rate - Input sample rate, in hertz.
     windowSec - The size of the evaluation window, in seconds.
     attackSec - Attack rate, in seconds.
-    releaseSec - Release rate, in seconds.'''
+    releaseSec - Release rate, in seconds.
+
+    Attack and release rates are the measured times it takes for the
+    difference between the follower's estimation of the input envelope and
+    the actual input envelope to reach within negative one neper (about -4.3
+    dB) of the input envelope.
+
+    The attack rate is used whenever the current estimation is below the
+    input and the release rate is used whenever the current estimation is
+    above the input.'''
      
     # Compute the attack coefficient.
     self._ga = exp(-1/(rate*attackSec))
@@ -82,8 +91,8 @@ class Expander(object):
 
     rate - Sample rate, in hertz.
     window - RMS averaging window size, in seconds.
-    attack - Attack time, in seconds.
-    release - Release time, in seconds.
+    attack - Attack time, in seconds. (Neper scale).
+    release - Release time, in seconds. (Neper scale).
     ratio - Expansion ratio, expressed as desired db(output level) /
             db(input level).
     threshold - Effect threshold, in dBfs (fs = "full scale", where full-scale
@@ -92,7 +101,7 @@ class Expander(object):
            be made quieter and input above this value will be louder.'''
     self._detector = EnvelopeFollower(rate, window, attack, release)
     self._threshold_nepers = (threshold / 20.0) * log(10)
-    self._ratio = ratio / log(10)
+    self._ratio = ratio - 1
     self._zero_nepers = ((zero - threshold)/ 20.0) * log(10)
 
   def process(self, data, control=None):
@@ -118,7 +127,7 @@ class DBXDecoder(object):
   Type_I = 1
   Type_II = 2 
 
-  def __init__(self, typ, rate, zero_point_dbfs=-15.0):
+  def __init__(self, typ, rate, zero_point_dbfs=-15.0, exp_r=2.0):
     '''Instantiate a decoder for a given DBX algorithm and sample rate.
 
     typ - DBX algorithm/type, as an integer.
@@ -131,19 +140,23 @@ class DBXDecoder(object):
 
     #
     # According to Bob Weitz, DBX uses:
-    #  - An expansion attack time of 16.5 ms
-    #  - An expansion release time of 76 ms.
+    #  - An expansion attack time of 16.5 ms (unknown log basis)
+    #  - An expansion release time of 76 ms. (unknown log basis)
     #  - An expansion ratio of 2:1.
     #  - An expansion zero point of -15dB below tape saturation point
     #    We will assume that the input has been amplified such that the
     #    tape saturation point occurs at 0 dBfs.
     #
+    # Over time I have changed these values by conducting my own tests of
+    # each parameter on my own DBX unit and by establishing a definite basis
+    # for the attack and release times in nepers. I now use these values:
+    #
     self._expander = Expander(
       rate,     # sample rate
       0.005,    # RMS window time (seconds)
-      0.0165,   # Attack time (seconds)
-      0.055,    # Release time (seconds)
-      2.0,      # Expansion ratio (out_dBfs/in_dBfs)
+      0.0165,   # Attack time (neper basis)
+      0.055,    # Release time (neper basis)
+      exp_r,    # Expansion ratio (out_dBfs/in_dBfs)
       -70.0,    # Expansion threshold (dBfs)
       zero_point_dbfs  # Expansion zero point (dBfs)
     )
@@ -369,8 +382,9 @@ def main(args):
   prog = args[0]
   typ = DBXDecoder.Type_II
   zero_point_dbfs = -15.0
+  exp_ratio = 2.0
 
-  (opts, args) = getopt.getopt(args[1:], 't:z:')
+  (opts, args) = getopt.getopt(args[1:], 't:z:r:')
   for opt, val in opts:
     if opt == '-t':
       try:
@@ -382,6 +396,11 @@ def main(args):
         zero_point_dbfs = float(val)
       except ValueError:
         error('Invalid zero point', 1)
+    elif opt == '-r':
+      try:
+        exp_ratio = float(val)
+      except ValueError:
+        error('Invalid expansion ratio', 1)
     else:
       fatal('Oops. Unhandled option.')
 
@@ -411,7 +430,7 @@ def main(args):
   out = numpy.empty((channels, block_size))
 
   processors = [
-    DBXDecoder(typ, rate, zero_point_dbfs) for x in range(channels)
+    DBXDecoder(typ, rate, zero_point_dbfs, exp_ratio) for x in range(channels)
   ]
 
   while True:
