@@ -138,47 +138,30 @@ class DBXDecoder(object):
   Type_I = 1
   Type_II = 2 
 
-  def __init__(self, typ, rate, zero_point_dbfs=-15.0, exp_r=2.0,
-               neper_attack_time_s=0.02352):
+  def __init__(self, typ, rate, zero_point_dbfs, threshold_dbfs, exp_r,
+               neper_attack_time_s, neper_release_time_s):
     '''Instantiate a decoder for a given DBX algorithm and sample rate.
 
     typ - DBX algorithm/type, as an integer.
           2 = DBX type II (the only supported type at the moment).
     rate - Sampling rate, in hertz.
-    exp_r - Expansion ratio (default 2.0)
+    zero_point_dbfs - Expander zero point, in dbFS.
+    threshold_dbfs - Expander threshold, in dbFS.
+    exp_r - Expansion ratio
     neper_attack_time_s - Attack time, in seconds, neper-basis.
-    zero_point_dbfs - Expander zero point, in dbFS.'''
+    neper_attack_time_s - Release time, in seconds, neper-basis.'''
 
     if typ != self.Type_II:
       raise Exception('Only type II supported at the moment.')
 
-    #
-    # According to Bob Weitz, DBX uses:
-    #  - An expansion attack time of 16.5 ms (unknown log basis)
-    #  - An expansion release time of 76 ms. (unknown log basis)
-    #  - An expansion ratio of 2:1.
-    #  - An expansion zero point of -15dB below tape saturation point
-    #    We will assume that the input has been amplified such that the
-    #    tape saturation point occurs at 0 dBfs.
-    #
-    # Over time I have changed these values by conducting my own tests of
-    # each parameter on my own DBX unit and by establishing a definite basis
-    # for the attack and release times in nepers. I now use these values:
-    #
-    # - Expansion attack time of 29 ms (neper basis)
-    # - Expansion release time of 107 ms (neper basis)
-    # - Default expansion ratio of 2:1
-    # - Default expansion zero-point of -15 dBfs.
-    # - Default expansion threshold of -55 dBfs.
-    #
     self._expander = Expander(
-      rate,     # sample rate
-      0.001,    # RMS window time (seconds)
+      rate,                 # sample rate
+      0.001,                # RMS window time (seconds)
       neper_attack_time_s,  # Attack time (neper basis)
-      0.107,    # Release time (neper basis)
-      exp_r,    # Expansion ratio (out_dBfs/in_dBfs)
-      -55.0,    # Expansion threshold (dBfs)
-      zero_point_dbfs  # Expansion zero point (dBfs)
+      neper_release_time_s, # Release time (neper basis)
+      exp_r,                # Expansion ratio (out_dBfs/in_dBfs)
+      threshold_dbfs,       # Expansion threshold (dBfs)
+      zero_point_dbfs       # Expansion zero point (dBfs)
     )
 
     #
@@ -381,17 +364,22 @@ def main(args):
       self._w.close()
 
   def usage(prog):
-    print >>sys.stderr, 'usage:', prog, '[-t <dbx-type>] [-z <zero-point>] [-r <ratio>] <in-wav> <out-wav>'
+    print >>sys.stderr, 'usage:', prog, '[-y <dbx-type>] [-z <zero-point>] ' \
+                        '[-R <ratio> [-a <attack>] [-r <release>] ' \
+                        '[-t <threshold>]] <in-wav> <out-wav>'
     print >>sys.stderr, 'Process an audio file with DBX noise reduction.'
-    print >>sys.stderr, '  -t <dbx-type>'
+    print >>sys.stderr, '  -y <dbx-type>'
     print >>sys.stderr, '    Use the specified DBX decoding type. Valid types '
     print >>sys.stderr, '    are:'
     print >>sys.stderr, '      2 - DBX Type II (default)'
     print >>sys.stderr, '  -z <zero-point>'
     print >>sys.stderr, '    Set the expander\'s zero point level to <zero-point>'
     print >>sys.stderr, '    decibels, full-scale (dbFS). The default is -15.'
-    print >>sys.stderr, '  -r <ratio>'
+    print >>sys.stderr, '  -R <ratio>'
     print >>sys.stderr, '    The expansion ratio to use. (default = 2.0)'
+    print >>sys.stderr, '  -a <attack_s>'
+    print >>sys.stderr, '  -r <release_s>'
+    print >>sys.stderr, '  -t <threshold_dbFS>'
     sys.exit(1)
 
   def error(msg, code):
@@ -403,13 +391,29 @@ def main(args):
 
   prog = args[0]
   typ = DBXDecoder.Type_II
-  zero_point_dbfs = -6.0
-  exp_ratio = 2.0
-  neper_attack_time = 0.02352
 
-  (opts, args) = getopt.getopt(args[1:], 't:z:r:')
+  #
+  # According to Bob Weitz, DBX uses:
+  #  - An expansion attack time of 16.5 ms (unknown log basis)
+  #  - An expansion release time of 76 ms. (unknown log basis)
+  #  - An expansion ratio of 2:1.
+  #  - An expansion zero point of -15dB below tape saturation point
+  #    We will assume that the input has been amplified such that the
+  #    tape saturation point occurs at 0 dBfs.
+  #
+  # Over time I have changed these values by conducting my own tests of
+  # each parameter on my own DBX unit and by establishing a definite basis
+  # for the attack and release times in nepers. I now use these values:
+  #
+  exp_ratio = 2.05
+  neper_attack_time = 0.049
+  neper_release_time = 0.033
+  zero_point_dbfs = -15
+  threshold_dbfs = -61.0
+
+  (opts, args) = getopt.getopt(args[1:], 'a:y:z:r:R:t:')
   for opt, val in opts:
-    if opt == '-t':
+    if opt == '-y':
       try:
         typ = int(val)
       except ValueError:
@@ -419,7 +423,7 @@ def main(args):
         zero_point_dbfs = float(val)
       except ValueError:
         error('Invalid zero point', 1)
-    elif opt == '-r':
+    elif opt == '-R':
       try:
         exp_ratio = float(val)
       except ValueError:
@@ -429,6 +433,16 @@ def main(args):
         neper_attack_time = float(val)
       except ValueError:
         error('Invalid attack time', 1)
+    elif opt == '-r':
+      try:
+        neper_release_time = float(val)
+      except ValueError:
+        error('Invalid release time', 1)
+    elif opt == '-t':
+      try:
+        threshold_dbfs = float(val)
+      except ValueError:
+        error('Invalid threshold', 1)
     else:
       fatal('Oops. Unhandled option.')
 
@@ -462,8 +476,10 @@ def main(args):
       typ,
       rate,
       zero_point_dbfs,
+      threshold_dbfs,
       exp_ratio,
-      neper_attack_time
+      neper_attack_time,
+      neper_release_time,
     ) for x in range(channels)
   ]
 
