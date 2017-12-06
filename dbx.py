@@ -142,7 +142,7 @@ class DBXDecoder(object):
       rate,     # sample rate
       0.005,    # RMS window time (seconds)
       0.0165,   # Attack time (seconds)
-      0.077,    # Release time (seconds)
+      0.055,    # Release time (seconds)
       2.0,      # Expansion ratio (out_dBfs/in_dBfs)
       -70.0,    # Expansion threshold (dBfs)
       zero_point_dbfs  # Expansion zero point (dBfs)
