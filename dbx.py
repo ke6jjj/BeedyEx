@@ -110,7 +110,7 @@ class Expander(object):
     nepers[numpy.where(nepers < 0.0)] = 0.0
     nepers -= self._zero_nepers
     nepers *= self._ratio
-    return data * numpy.exp(nepers) * 1.414
+    return data * numpy.exp(nepers)
 
 class DBXDecoder(object):
   '''A decoder for the DBX noise reduction algorithm.'''
@@ -118,18 +118,19 @@ class DBXDecoder(object):
   Type_I = 1
   Type_II = 2 
 
-  def __init__(self, typ, rate):
+  def __init__(self, typ, rate, zero_point_dbfs=-15.0):
     '''Instantiate a decoder for a given DBX algorithm and sample rate.
 
     typ - DBX algorithm/type, as an integer.
           2 = DBX type II (the only supported type at the moment).
-    rate - Sampling rate, in hertz.'''
+    rate - Sampling rate, in hertz.
+    zero_point_dbfs - Expander zero point, in dbFS.'''
 
     if typ != self.Type_II:
       raise Exception('Only type II supported at the moment.')
 
     #
-    # According to Bob Weitz, DBX I uses:
+    # According to Bob Weitz, DBX uses:
     #  - An expansion attack time of 16.5 ms
     #  - An expansion release time of 76 ms.
     #  - An expansion ratio of 2:1.
@@ -144,7 +145,7 @@ class DBXDecoder(object):
       0.077,    # Release time (seconds)
       2.0,      # Expansion ratio (out_dBfs/in_dBfs)
       -70.0,    # Expansion threshold (dBfs)
-      -16.0     # Expansion zero point (dBfs)
+      zero_point_dbfs  # Expansion zero point (dBfs)
     )
 
     #
@@ -215,28 +216,16 @@ class DBXDecoder(object):
     #
     # The post-emphasis filter has two bands:
     #  1. A parametric boost filter with:
-    #    * A center frequency of 50 hertz
+    #    * A center frequency of 80 hertz
     #    * A Q value of .22
-    #    * A gain value of 6 dB
-    #  2. A parametric cut filter with:
-    #    * A center frequency of 5 kHz
-    #    * A Q value of .22
-    #    * A gain value of -6 dB
+    #    * A gain value of 12 dB
     #
     postEQ = pyEQ.FilterChain()
     postEQ._filters.append(
       pyEQ.Filter(
         pyEQ.FilterType.Peak,  # type
-        50.0 / rate * 2,       # frequency (ratio against sample rate)
-        6.0,                   # gain (decibels)
-        .22                    # q
-      )
-    )
-    postEQ._filters.append(
-      pyEQ.Filter(
-        pyEQ.FilterType.Peak,  # type
-        6500.0 / rate * 2,     # frequency (ratio against sample rate)
-        -6.0,                  # gain (decibels)
+        80.0 / rate * 2,       # frequency (ratio against sample rate)
+        12.0,                  # gain (decibels)
         .22                    # q
       )
     )
@@ -356,11 +345,15 @@ def main(args):
       self._w.close()
 
   def usage(prog):
-    print >>sys.stderr, 'usage:', prog, '[-t <dbx-type>] <in-wav> <out-wav>'
+    print >>sys.stderr, 'usage:', prog, '[-t <dbx-type>] [-z <zero-point>] <in-wav> <out-wav>'
     print >>sys.stderr, 'Process an audio file with DBX noise reduction.'
-    print >>sys.stderr, '  -t <dbx-type> - Use the specified DBX decoding'
-    print >>sys.stderr, '    type. Valid types are:'
-    print >>sys.stderr, '      2 - DBX Type II (defaut)'
+    print >>sys.stderr, '  -t <dbx-type>'
+    print >>sys.stderr, '    Use the specified DBX decoding type. Valid types '
+    print >>sys.stderr, '    are:'
+    print >>sys.stderr, '      2 - DBX Type II (default)'
+    print >>sys.stderr, '  -z <zero-point>'
+    print >>sys.stderr, '    Set the expander\'s zero point level to <zero-point>'
+    print >>sys.stderr, '    decibels, full-scale (dbFS). The default is -15.'
     sys.exit(1)
 
   def error(msg, code):
@@ -372,14 +365,20 @@ def main(args):
 
   prog = args[0]
   typ = DBXDecoder.Type_II
+  zero_point_dbfs = -15.0
 
-  (opts, args) = getopt.getopt(args[1:], 't:')
+  (opts, args) = getopt.getopt(args[1:], 't:z:')
   for opt, val in opts:
     if opt == '-t':
       try:
         typ = int(val)
       except ValueError:
         error('Invalid DBX type', 1)
+    elif opt == '-z':
+      try:
+        zero_point_dbfs = float(val)
+      except ValueError:
+        error('Invalid zero point', 1)
     else:
       fatal('Oops. Unhandled option.')
 
@@ -408,7 +407,9 @@ def main(args):
   block_size = 2048
   out = numpy.empty((channels, block_size))
 
-  processors = [ DBXDecoder(typ, rate) for x in range(channels) ]
+  processors = [
+    DBXDecoder(typ, rate, zero_point_dbfs) for x in range(channels)
+  ]
 
   while True:
     frames = src.read(block_size)
