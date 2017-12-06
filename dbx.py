@@ -283,7 +283,10 @@ def main(args):
         samples = samples.reshape((channels, frame_count), order='F')
         samples = samples / float(0x80)
       elif depth == 2:
-        samples = numpy.fromstring(data, dtype=numpy.int16)
+        samples = numpy.fromstring(data, dtype=numpy.uint8)
+        samples = samples.astype(numpy.int16)
+        samples = (samples[1::2] << 8) + \
+                  (samples[0::2]     )
         samples = samples.reshape((channels, frame_count), order='F')
         samples = samples / float(0x8000)
       else:
@@ -327,14 +330,14 @@ def main(args):
         data =  ''.join([chr(x) for x in data])
       elif self._depth == 2:
         data = (data * 0x8000).clip(-0x8000, 0x7fff).astype(numpy.int16)
-        out = numpy.empty(2*framecount, dtype=numpy.uint8)
+        out = numpy.empty(2*framecount*self._channels, dtype=numpy.uint8)
         out[1::2] = (data >> 8) & 0xff
         out[0::2] = (data     ) & 0xff
         data = ''.join([chr(x) for x in out])
       else:
         assert(self._depth == 3)
         data = (data * 0x800000).clip(-0x800000, 0x7fffff).astype(numpy.int32)
-        out = numpy.empty(3*framecount, dtype=numpy.uint8)
+        out = numpy.empty(3*framecount*self._channels, dtype=numpy.uint8)
         out[2::3] = (data >> 16) & 0xff
         out[1::3] = (data >>  8) & 0xff
         out[0::3] = (data      ) & 0xff
