@@ -138,12 +138,15 @@ class DBXDecoder(object):
   Type_I = 1
   Type_II = 2 
 
-  def __init__(self, typ, rate, zero_point_dbfs=-15.0, exp_r=2.0):
+  def __init__(self, typ, rate, zero_point_dbfs=-15.0, exp_r=2.0,
+               neper_attack_time_s=0.02352):
     '''Instantiate a decoder for a given DBX algorithm and sample rate.
 
     typ - DBX algorithm/type, as an integer.
           2 = DBX type II (the only supported type at the moment).
     rate - Sampling rate, in hertz.
+    exp_r - Expansion ratio (default 2.0)
+    neper_attack_time_s - Attack time, in seconds, neper-basis.
     zero_point_dbfs - Expander zero point, in dbFS.'''
 
     if typ != self.Type_II:
@@ -171,7 +174,7 @@ class DBXDecoder(object):
     self._expander = Expander(
       rate,     # sample rate
       0.001,    # RMS window time (seconds)
-      0.029,    # Attack time (neper basis)
+      neper_attack_time_s,  # Attack time (neper basis)
       0.107,    # Release time (neper basis)
       exp_r,    # Expansion ratio (out_dBfs/in_dBfs)
       -55.0,    # Expansion threshold (dBfs)
@@ -378,7 +381,7 @@ def main(args):
       self._w.close()
 
   def usage(prog):
-    print >>sys.stderr, 'usage:', prog, '[-t <dbx-type>] [-z <zero-point>] <in-wav> <out-wav>'
+    print >>sys.stderr, 'usage:', prog, '[-t <dbx-type>] [-z <zero-point>] [-r <ratio>] <in-wav> <out-wav>'
     print >>sys.stderr, 'Process an audio file with DBX noise reduction.'
     print >>sys.stderr, '  -t <dbx-type>'
     print >>sys.stderr, '    Use the specified DBX decoding type. Valid types '
@@ -387,6 +390,8 @@ def main(args):
     print >>sys.stderr, '  -z <zero-point>'
     print >>sys.stderr, '    Set the expander\'s zero point level to <zero-point>'
     print >>sys.stderr, '    decibels, full-scale (dbFS). The default is -15.'
+    print >>sys.stderr, '  -r <ratio>'
+    print >>sys.stderr, '    The expansion ratio to use. (default = 2.0)'
     sys.exit(1)
 
   def error(msg, code):
@@ -400,6 +405,7 @@ def main(args):
   typ = DBXDecoder.Type_II
   zero_point_dbfs = -6.0
   exp_ratio = 2.0
+  neper_attack_time = 0.02352
 
   (opts, args) = getopt.getopt(args[1:], 't:z:r:')
   for opt, val in opts:
@@ -418,6 +424,11 @@ def main(args):
         exp_ratio = float(val)
       except ValueError:
         error('Invalid expansion ratio', 1)
+    elif opt == '-a':
+      try:
+        neper_attack_time = float(val)
+      except ValueError:
+        error('Invalid attack time', 1)
     else:
       fatal('Oops. Unhandled option.')
 
@@ -447,7 +458,13 @@ def main(args):
   out = numpy.empty((channels, block_size))
 
   processors = [
-    DBXDecoder(typ, rate, zero_point_dbfs, exp_ratio) for x in range(channels)
+    DBXDecoder(
+      typ,
+      rate,
+      zero_point_dbfs,
+      exp_ratio,
+      neper_attack_time
+    ) for x in range(channels)
   ]
 
   while True:
