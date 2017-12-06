@@ -1,0 +1,132 @@
+Compressor musings
+
+  If an envelope follower consists of a one-pole IIR filter that obeys
+
+    out(t) = out(t-1) * alpha + in(t) * (1 - alpha)
+  
+  Then a step input of size x at t=0 will produce:
+
+    out(t) = x - x * e^(t*ln(alpha))
+           = x * (1 - e^(t*ln(alpha)))
+
+The process of measuring attack times and converting them to values usable
+in this software.
+
+  Measure or prepare the step test gain:
+  
+  s = step size, raw ratio (e.g 13dB = 10^1.3 = 20)
+  
+  Measure or assume the expansion ratio:
+  
+  r = response_level / pre_response_level
+  (or, using log scale, r = response_dB - pre_response_dB)
+  
+  Calculate:
+  
+  y = s - s * e^-1 = s (1 - s^-1)
+  
+    This is the -1 neper response value; the point at which the
+    follower estimation of the step input has climbed so that the
+    error between the estimation and the input (step input - the estimation),
+    is equal to step_input * -1 neper.
+ 
+  Deriving t - the attack time unit:
+  
+  Now find the time at which the follower estimation has climbed to y.
+  This is t, the attack time in the neper basis.
+  
+  Measuring the real follower's estimation value when looking at signals from
+  the full expander is complicated because we can't directly see it. We can
+  only observe the envelope follower's output by its effect on the gain that
+  has been applied to the signal. We have to work backwards by observing the
+  gain and removing the expansion ratio.
+    
+  To do this, we take the observed signal level (in dB), subtract the level
+  of the observed signal at the first instant the change in input levels is
+  encountered (again, in dB), and then derate for the expansion ratio.
+  
+  o(0) = observed signal level (in dB) at start of step pulse
+  o(n) = observed signal level (in dB) at time n.
+  
+  We can then derive v(n), which is the inferred value of the envelope
+  follower at time n.
+  
+            [ o(n) - o(0) ]
+  v(n) = 10^[ ----------- ]
+            [   (r - 1)   ]
+            
+  The final step is to examine v(n) and find the point in time, n, where
+  v(n) = y.
+
+
+
+Example: How I probed the DBX expander in my tape unit.
+  
+  Test signal: 1 kHz tone alternating between 0 dB RMS and -10 dB RMS, recorded
+               to tape without encoding, and with enough gain that it
+               alternated between 0 dB and -10 dB on the tape meter when played
+               back (without decoding).
+
+  This gives us our first value, the step input gain:
+    
+  s = 10.0 (not decibels; raw gain value)
+
+  We can also compute the -1 neper error in response to this step:
+   
+  y = s * (1 - e^-1) = 10 * (1 - e^-1) = 6.3
+
+  This is the raw value at which a one-pole envelope follower's error will have
+  been reduced to -1 neper of the step input size.
+  
+  Now the first measurements. I played this recorded signal back, making
+  sure to engage the DBX decoder, and digitized it. Examining the recording,
+  I observed that the quieter tone was digitized at -39 dBfs RMS and the louder
+  tone eventually settled in at -18.5 dbFS RMS.
+  
+  This yields our first measurement: the expansion ratio.
+  
+  r = (-18.5 dB - -39 dB) / 10 dB
+    = 2.05 (dimensionless)
+  
+  The next step is to figure out the signal level we should expect to see once
+  the internal envelope follower's response has reached y times its starting
+  value.
+  
+  Since y is a ratio in this scenario, we can rephrase it as decibels of
+  gain, z:
+  
+  z = dB(y) = 8.00 dB (~= 6.3)
+  
+  Now we make a measurement of the input signal to determine o(0). I found that
+  the first peak of the higher sine wave section was digitized at -26.25 dB.
+  Since all my other measurements are in RMS, however, I must reduce this
+  value by 3 dB to arrive at the RMS value: -29.25 dB.
+  
+  o(0) = -29.25 dB
+  
+  We can now compute what o(n) will have to be when n is the neper attack
+  time:
+  
+  o(attack_time) =
+       = o(0) + z * (r - 1)
+       = -29.25 dB + 8.00 dB * (r - 1)
+       = -29.25 dB + 8.00 dB * 1.05
+       = -29.25 dB + 8.40 dB
+       = -20.85 dB
+  
+  I must now search the decoder response signal until I find that the signal
+  has risen to -20.85 dB (RMS). Since it is much easier to observe sine wave
+  peaks than RMS values, I adjust this to:
+  
+  o(attack_time) peak = -20.85 dB RMS + 3 dB = -17.85 dB peak
+  
+  The signal reaches this value 27.479 ms after the step input. Thus,
+  
+  attack_time (neper-based) = 27.479 milliseconds
+  
+  I stress that this is the NEPER-BASED attack time. I think the industry
+  standard attack time base is decibel, and thus, to convert to that time
+  base, you'd have to multiply the neper-based time by some constant, probably
+  1 / log10(e). That would make its decibel attack time:
+  
+  attack_time (decibel-based) = 11.93 milliseconds
