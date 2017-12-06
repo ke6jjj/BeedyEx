@@ -4,8 +4,8 @@ import numpy
 import pyEQ
 
 class EnvelopeFollower(object):
-  '''Calculates the instantaneous envelope of a waveform using classical
-  attack and release time parameters. Uses RMS determination.'''
+  '''Calculates the instantaneous power envelope of a waveform using classical
+  attack and release time parameters.'''
   
   def __init__(self, rate, windowSec, attackSec, releaseSec):
     '''Initializes and configures envelope detector.
@@ -43,10 +43,15 @@ class EnvelopeFollower(object):
     self._envelope = 0.0
 
   def process(self, data):
-    '''Calculate the instantaneous envelope for the given array of input
-    data, returning an output array of envelope values the same size.'''
+    '''Calculate the instantaneous power envelope for the given array of
+    input data, returning an output array of envelope values the same size.
+
+    The values returned are power-scaled, not voltage scaled. Thus, if the
+    input waveform has an RMS power of -10 dBfs, returns 0.01 and not
+    0.0316. 0.316 would be the equivalent RMS voltage for the same signal.
+    '''
     # Square each input sample and then rescale for the evaluation
-    # window size.
+    # window size. 
     data = data * data
     data = data / self._windowSz
 
@@ -66,13 +71,12 @@ class EnvelopeFollower(object):
         sum += sample
         sum -= hist[(j + i) % n]
         hist[(j + i) % n] = sample
-        sq = sqrt(sum)
-        if env < sq:
+        if env < sum:
           env *= ga
-          env += (1 - ga) * sq
+          env += (1 - ga) * sum
         else:
           env *= gr
-          env += (1 - gr) * sq
+          env += (1 - gr) * sum
         ret[i] = env
 
     self._envelope = env
@@ -100,9 +104,16 @@ class Expander(object):
     zero - Zero expansion point, in decibels. Input below this value will
            be made quieter and input above this value will be louder.'''
     self._detector = EnvelopeFollower(rate, window, attack, release)
-    self._threshold_nepers = (threshold / 20.0) * log(10)
-    self._ratio = ratio - 1
-    self._zero_nepers = ((zero - threshold)/ 20.0) * log(10)
+    self._threshold_nepers = (threshold / 10.0) * log(10)
+    #
+    # We will be using a scalar multiplication of the input signal when we
+    # apply the gain correction. To keep the expansion ratio as a power
+    # ratio and not a voltage ratio, we must multiply by the square root
+    # of the power gain required. This is easy to do in the logarithmic
+    # domain by reducing expansion ratio by one half.
+    # 
+    self._ratio = (ratio - 1) / 2.0
+    self._zero_nepers = ((zero - threshold)/ 10.0) * log(10)
 
   def process(self, data, control=None):
     '''Expand a buffer of samples, possibly using a different buffer of
@@ -151,13 +162,19 @@ class DBXDecoder(object):
     # each parameter on my own DBX unit and by establishing a definite basis
     # for the attack and release times in nepers. I now use these values:
     #
+    # - Expansion attack time of 29 ms (neper basis)
+    # - Expansion release time of 107 ms (neper basis)
+    # - Default expansion ratio of 2:1
+    # - Default expansion zero-point of -15 dBfs.
+    # - Default expansion threshold of -55 dBfs.
+    #
     self._expander = Expander(
       rate,     # sample rate
-      0.005,    # RMS window time (seconds)
-      0.0165,   # Attack time (neper basis)
-      0.055,    # Release time (neper basis)
+      0.001,    # RMS window time (seconds)
+      0.029,    # Attack time (neper basis)
+      0.107,    # Release time (neper basis)
       exp_r,    # Expansion ratio (out_dBfs/in_dBfs)
-      -70.0,    # Expansion threshold (dBfs)
+      -55.0,    # Expansion threshold (dBfs)
       zero_point_dbfs  # Expansion zero point (dBfs)
     )
 
@@ -381,7 +398,7 @@ def main(args):
 
   prog = args[0]
   typ = DBXDecoder.Type_II
-  zero_point_dbfs = -15.0
+  zero_point_dbfs = -6.0
   exp_ratio = 2.0
 
   (opts, args) = getopt.getopt(args[1:], 't:z:r:')
